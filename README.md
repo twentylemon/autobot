@@ -30,13 +30,17 @@ on the target repo. Comment on the PR and (in v0.1+) the bot will revise it.
 
 ```bash
 pip install -e .
-export ANTHROPIC_API_KEY=...
 export GITHUB_TOKEN=...                            # PAT with `repo` scope
 export AUTOBOT_DEFAULT_REPO=twentylemon/duckbot    # optional
 ```
 
-`gh` and `git` must be installed and authenticated — they are invoked by
-Claude inside the worker subprocess.
+The Claude Agent SDK ships a bundled `claude` CLI binary and shells out to
+it. It uses whatever credentials live in `~/.claude/`, so a one-time
+`claude` + `/login` on this machine is enough — no `ANTHROPIC_API_KEY`
+needed. Usage bills against your Claude subscription.
+
+`gh` and `git` must also be installed and authenticated — they are invoked
+by Claude inside the worker subprocess.
 
 ## Task file format
 
@@ -66,7 +70,8 @@ For background hosting on macOS, write a `LaunchAgent` plist at
 `~/Library/LaunchAgents/com.twentylemon.autobot.plist` invoking
 `python -m autobot --once` every 600 seconds. Set `PATH`, `HOME`, and
 `GITHUB_TOKEN` explicitly in the plist (launchd does not inherit your
-interactive shell env).
+interactive shell env). `HOME` is what lets the bundled `claude` CLI
+locate `~/.claude/` and pick up your subscription credentials.
 
 ## Layout
 

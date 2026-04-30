@@ -5,7 +5,6 @@ from pathlib import Path
 
 @dataclass(frozen=True)
 class Config:
-    anthropic_api_key: str
     github_token: str
     inbox_dir: Path
     processing_dir: Path
@@ -26,16 +25,11 @@ def load() -> Config:
     work_dir = Path(os.environ.get("AUTOBOT_WORK_DIR", home / "work")).expanduser()
     state_db = Path(os.environ.get("AUTOBOT_STATE_DB", home / "state.db")).expanduser()
 
-    anthropic_api_key = os.environ.get("ANTHROPIC_API_KEY")
-    if not anthropic_api_key:
-        raise RuntimeError("ANTHROPIC_API_KEY is required")
-
     github_token = os.environ.get("GITHUB_TOKEN")
     if not github_token:
         raise RuntimeError("GITHUB_TOKEN is required")
 
     config = Config(
-        anthropic_api_key=anthropic_api_key,
         github_token=github_token,
         inbox_dir=inbox_dir,
         processing_dir=home / "processing",

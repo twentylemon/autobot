@@ -33,7 +33,6 @@ class FakeSource(TaskSource):
 def config(tmp_path: Path) -> Config:
     home = tmp_path / "home"
     return Config(
-        anthropic_api_key="x",
         github_token="y",
         inbox_dir=home / "inbox",
         processing_dir=home / "processing",
