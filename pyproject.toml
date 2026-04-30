@@ -1,0 +1,56 @@
+[build-system]
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["autobot*"]
+
+[project]
+name = "autobot"
+version = "0.0.1"
+description = "Autonomous draft-PR service: drop a task in inbox/, get a draft PR back"
+readme = "README.md"
+requires-python = ">=3.10"
+
+dependencies = [
+    "claude-agent-sdk==0.1.71",
+    "PyGithub==2.1.1",
+    "PyYAML==6.0.2",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest==8.3.5",
+    "pytest-asyncio==0.26.0",
+    "pytest-cov==6.1.1",
+    "pytest-sugar==1.0.0",
+    "pytest-icdiff==0.9",
+    "black==25.1.0",
+    "flake8==7.2.0",
+    "flake8-pyproject==1.2.3",
+    "flake8-black==0.3.6",
+    "flake8-isort==6.1.2",
+    "isort==6.0.1",
+    "pep8-naming==0.15.1",
+]
+
+[project.scripts]
+autobot = "autobot.main:cli"
+
+[tool.black]
+line-length = 200
+target-version = ["py310"]
+
+[tool.isort]
+profile = "black"
+multi_line_output = 3
+
+[tool.pytest.ini_options]
+addopts = "-ra"
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+
+[tool.flake8]
+max-line-length = 200
+max-complexity = 10
+per-file-ignores = ["__init__.py:F401"]
