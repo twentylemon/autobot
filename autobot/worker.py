@@ -139,10 +139,14 @@ async def execute_task(
             result_file=paths.result_file,
         )
     )
+    # bypassPermissions: nothing to interactively approve in a headless run.
+    # disallowed_tools: prevent Claude from picking up tools that would block
+    # waiting for a human (AskUserQuestion) or pause execution indefinitely
+    # (Enter/ExitPlanMode).
     options = ClaudeAgentOptions(
         cwd=str(config.work_dir),
-        permission_mode="acceptEdits",
-        allowed_tools=["Read", "Edit", "Write", "Bash", "Glob", "Grep"],
+        permission_mode="bypassPermissions",
+        disallowed_tools=["AskUserQuestion", "EnterPlanMode", "ExitPlanMode"],
     )
 
     session_id: str | None = None
