@@ -99,3 +99,10 @@ locate `~/.claude/` and pick up your subscription credentials.
 ```bash
 python -m pytest
 ```
+
+## Roadmap & open questions
+
+See [`docs/`](docs/) — [`roadmap.md`](docs/roadmap.md) for upcoming
+phases (v0.1 PR revision, v0.2 merge detection, v0.3 destination
+abstraction) and [`open-questions.md`](docs/open-questions.md) for
+surviving risks.
