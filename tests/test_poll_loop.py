@@ -32,10 +32,9 @@ def test_poll_with_new_comment_transitions_to_needs_revision(state: State, confi
     final = state.get_by_id(row.id)
     assert final.status == "needs_revision"
     assert final.last_comment_id == 4242
-    assert final.last_revision_at is not None
 
 
-def test_poll_with_no_action_only_stamps_revision_at(state: State, config: Config) -> None:
+def test_poll_with_no_action_leaves_row_unchanged(state: State, config: Config) -> None:
     _submitted_row(state)
     row = state.get_by_id("local:foo-abc123")
     payload = {"status": "no_action"}
@@ -44,7 +43,6 @@ def test_poll_with_no_action_only_stamps_revision_at(state: State, config: Confi
     final = state.get_by_id(row.id)
     assert final.status == "submitted"
     assert final.last_comment_id is None
-    assert final.last_revision_at is not None
 
 
 def test_poll_writes_per_invocation_log(state: State, config: Config) -> None:

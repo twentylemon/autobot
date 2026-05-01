@@ -228,7 +228,7 @@ async def poll_pr(
     query_fn: QueryFn = _default_query,
 ) -> results.Result:
     """Cheap poll on a submitted PR. Transitions submitted → needs_revision if a new
-    human comment exists, else just stamps last_revision_at."""
+    human comment exists; no-action polls are a true no-op."""
     paths = compute_paths(row, config)
     if row.pr_number is None or row.pr_url is None:
         log.warning("skipping poll for %s: no pr_number/pr_url recorded", row.id)
@@ -260,7 +260,6 @@ async def poll_pr(
         log.info("poll: %s has new comments (last_comment_id=%d)", row.id, result.last_comment_id)
         return result
     if isinstance(result, results.NoAction):
-        state.record_no_action(row.id)
         return result
     log.warning("poll for %s returned unexpected result %r — leaving row unchanged", row.id, result)
     return result
@@ -298,28 +297,12 @@ async def revise_task(
     config: Config,
     *,
     query_fn: QueryFn = _default_query,
-    now: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
 ) -> results.Result:
-    """Run one revision pass for a `needs_revision` row. Enforces the per-PR
-    revision cap and cooldown before invoking Claude."""
+    """Run one revision pass for a `needs_revision` row. Per-PR rate is bounded
+    naturally: only one row per PR is in `needs_revision` at a time, and the
+    next revision can't start until this one finishes (or stale-lease recovery
+    bumps it back)."""
     paths = compute_paths(row, config)
-
-    # Hard cap: too many revisions, give up.
-    if row.revision_count >= config.revision_cap:
-        log.warning("revision cap hit for %s (%d >= %d) — marking failed_revision", row.id, row.revision_count, config.revision_cap)
-        # needs_revision -> revising -> failed_revision keeps within the allowed table.
-        state.record_revision_start(row.id)
-        _write_error_sidecar(paths.result_file, f"revision cap reached: {row.revision_count}", paths.log_file)
-        state.update_status(row.id, "failed_revision")
-        return results.Unknown(reason=f"revision cap {config.revision_cap} reached")
-
-    # Cooldown: revised too recently — skip silently this tick.
-    if row.last_revision_at is not None:
-        elapsed = now() - row.last_revision_at
-        if elapsed < _minutes(config.revision_cooldown_minutes):
-            log.debug("revision cooldown for %s (last %s ago) — skipping this tick", row.id, elapsed)
-            return results.NoAction()
-
     state.record_revision_start(row.id)
     revision_n = row.revision_count + 1
     revision_log = paths.log_file.with_name(f"{paths.log_file.stem}.revision-{revision_n}.log")

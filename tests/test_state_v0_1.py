@@ -27,7 +27,6 @@ def test_v0_1_columns_present_on_fresh_db(state: State) -> None:
     row = state.get_by_id("local:foo")
     assert row.last_comment_id is None
     assert row.revision_count == 0
-    assert row.last_revision_at is None
 
 
 def test_v0_1_columns_idempotent_on_reopen(tmp_path: Path) -> None:
@@ -117,30 +116,19 @@ def test_get_stale_revising_filters_by_updated_at(state: State) -> None:
     assert [r.id for r in stale] == ["local:stale"]
 
 
-def test_record_poll_result_stamps_last_comment_id_and_revision_at(state: State) -> None:
+def test_record_poll_result_stamps_last_comment_id(state: State) -> None:
     _seed(state)
     _to_submitted(state)
     state.record_poll_result("local:foo", last_comment_id=42)
     row = state.get_by_id("local:foo")
     assert row.status == "needs_revision"
     assert row.last_comment_id == 42
-    assert row.last_revision_at is not None
 
 
 def test_record_poll_result_rejects_wrong_starting_state(state: State) -> None:
     _seed(state)  # status=pending, not submitted
     with pytest.raises(ValueError, match="expected status 'submitted'"):
         state.record_poll_result("local:foo", last_comment_id=1)
-
-
-def test_record_no_action_only_bumps_revision_at(state: State) -> None:
-    _seed(state)
-    _to_submitted(state)
-    state.record_no_action("local:foo")
-    row = state.get_by_id("local:foo")
-    assert row.status == "submitted"
-    assert row.last_comment_id is None
-    assert row.last_revision_at is not None
 
 
 def test_record_revision_start_locks_row(state: State) -> None:

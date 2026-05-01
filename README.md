@@ -27,10 +27,12 @@ the next tick, revising the PR on the same branch.
    prompt and invoke the Claude Agent SDK. Claude does *all* git/`gh`
    operations: refresh the canonical clone, create a `git worktree` on a
    fresh branch, edit files, commit, push, and `gh pr create --draft`.
-5. **Execute revisions** — for each `needs_revision` row (subject to
-   `revision_cap` and `revision_cooldown_minutes`), Claude re-enters the
-   worktree, fetches the new comment thread, addresses the feedback,
-   commits, and pushes — keeping the PR in draft state.
+5. **Execute revisions** — for each `needs_revision` row, Claude
+   re-enters the worktree, fetches the new comment thread, addresses
+   the feedback, commits, and pushes — keeping the PR in draft state.
+   Per-PR revision rate is bounded naturally: a PR is only ever in one
+   state at a time, so the next revision can't start until this one
+   finishes.
 6. **Reconcile** — Claude writes a JSON result file at
    `~/.autobot/results/<task-id>.json`; the worker reads it and applies
    the appropriate state transition.
@@ -42,8 +44,6 @@ pip install -e .
 export GITHUB_TOKEN=...                            # PAT with `repo` scope
 export AUTOBOT_DEFAULT_REPO=twentylemon/duckbot    # optional
 export AUTOBOT_MAX_DIFF_LOC=2000                   # optional, sprawl guard
-export AUTOBOT_REVISION_CAP=10                     # optional, max revisions/PR
-export AUTOBOT_REVISION_COOLDOWN_MINUTES=20        # optional, min gap between revisions
 ```
 
 The Claude Agent SDK ships a bundled `claude` CLI binary and shells out to
@@ -110,9 +110,9 @@ locate `~/.claude/` and pick up your subscription credentials.
   recovery phase will bump it back to `needs_revision` automatically once
   `updated_at` is older than 30 minutes.
 - **Task in `failed_revision`:** terminal — Claude couldn't address the
-  feedback (e.g. push rejected, ambiguous comment, or hit `revision_cap`).
-  Inspect `logs/<task>.revision-*.log` for the SDK trace; if you want
-  another attempt, manually flip the row back to `needs_revision`.
+  feedback (e.g. push rejected, ambiguous comment). Inspect
+  `logs/<task>.revision-*.log` for the SDK trace; if you want another
+  attempt, manually flip the row back to `needs_revision`.
 - **Task in `failed_too_large`:** terminal — Claude's diff exceeded
   `AUTOBOT_MAX_DIFF_LOC` (default 2000). Either raise the cap, split the
   task, or close the PR by hand.

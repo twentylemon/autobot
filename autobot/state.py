@@ -50,7 +50,6 @@ CREATE TABLE IF NOT EXISTS tasks (
   session_id        TEXT,
   last_comment_id   INTEGER,
   revision_count    INTEGER NOT NULL DEFAULT 0,
-  last_revision_at  TEXT,
   created_at        TEXT NOT NULL,
   updated_at        TEXT NOT NULL
 );
@@ -62,7 +61,6 @@ CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
 _V0_1_COLUMNS = (
     ("last_comment_id", "INTEGER"),
     ("revision_count", "INTEGER NOT NULL DEFAULT 0"),
-    ("last_revision_at", "TEXT"),
 )
 
 
@@ -81,17 +79,12 @@ class TaskRow:
     session_id: str | None
     last_comment_id: int | None
     revision_count: int
-    last_revision_at: datetime | None
     created_at: datetime
     updated_at: datetime
 
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
-
-
-def _opt_dt(value: str | None) -> datetime | None:
-    return datetime.fromisoformat(value) if value else None
 
 
 def _row_to_task(row: sqlite3.Row) -> TaskRow:
@@ -109,7 +102,6 @@ def _row_to_task(row: sqlite3.Row) -> TaskRow:
         session_id=row["session_id"],
         last_comment_id=row["last_comment_id"],
         revision_count=row["revision_count"],
-        last_revision_at=_opt_dt(row["last_revision_at"]),
         created_at=datetime.fromisoformat(row["created_at"]),
         updated_at=datetime.fromisoformat(row["updated_at"]),
     )
@@ -217,34 +209,20 @@ class State:
 
     def record_poll_result(self, task_id: str, last_comment_id: int) -> None:
         """Phase 2 dispatch: mark a polled `submitted` row as needing a revision."""
-        now = _now()
         with self._tx() as c:
             self._guard_transition(c, task_id, "submitted", "needs_revision")
             c.execute(
-                "UPDATE tasks SET status = 'needs_revision', last_comment_id = ?, last_revision_at = ?, updated_at = ? WHERE id = ?",
-                (last_comment_id, now, now, task_id),
-            )
-
-    def record_no_action(self, task_id: str) -> None:
-        """Phase 2 dispatch: a clean poll — nothing changed, just stamp the timestamp."""
-        now = _now()
-        with self._tx() as c:
-            current = c.execute("SELECT status FROM tasks WHERE id = ?", (task_id,)).fetchone()
-            if current is None:
-                raise KeyError(f"no task with id {task_id}")
-            c.execute(
-                "UPDATE tasks SET last_revision_at = ?, updated_at = ? WHERE id = ?",
-                (now, now, task_id),
+                "UPDATE tasks SET status = 'needs_revision', last_comment_id = ?, updated_at = ? WHERE id = ?",
+                (last_comment_id, _now(), task_id),
             )
 
     def record_revision_start(self, task_id: str) -> None:
         """Phase 6 dispatch: lock a `needs_revision` row by transitioning it to `revising`."""
-        now = _now()
         with self._tx() as c:
             self._guard_transition(c, task_id, "needs_revision", "revising")
             c.execute(
-                "UPDATE tasks SET status = 'revising', last_revision_at = ?, updated_at = ? WHERE id = ?",
-                (now, now, task_id),
+                "UPDATE tasks SET status = 'revising', updated_at = ? WHERE id = ?",
+                (_now(), task_id),
             )
 
     def record_revision_result(self, task_id: str, last_comment_id: int) -> None:
@@ -253,13 +231,12 @@ class State:
         head_sha lives in the result file on disk for audit; state.db only tracks
         what the state machine needs.
         """
-        now = _now()
         with self._tx() as c:
             self._guard_transition(c, task_id, "revising", "submitted")
             c.execute(
                 "UPDATE tasks SET status = 'submitted', revision_count = revision_count + 1, "
-                "last_comment_id = ?, last_revision_at = ?, updated_at = ? WHERE id = ?",
-                (last_comment_id, now, now, task_id),
+                "last_comment_id = ?, updated_at = ? WHERE id = ?",
+                (last_comment_id, _now(), task_id),
             )
 
     def _guard_transition(self, c: sqlite3.Connection, task_id: str, expected: str, target: str) -> None:

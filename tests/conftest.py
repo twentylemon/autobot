@@ -24,8 +24,6 @@ def config(tmp_path: Path) -> Config:
         state_db=home / "state.db",
         default_repo=None,
         max_diff_loc=2000,
-        revision_cap=10,
-        revision_cooldown_minutes=20,
     )
 
 

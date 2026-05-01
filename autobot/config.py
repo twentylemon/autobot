@@ -14,8 +14,6 @@ class Config:
     state_db: Path
     default_repo: str | None  # owner/name, optional
     max_diff_loc: int  # sprawling-diff guard threshold (insertions + deletions)
-    revision_cap: int  # hard cap on total revisions per PR
-    revision_cooldown_minutes: int  # min minutes between revisions on the same PR
 
 
 def _autobot_home() -> Path:
@@ -42,8 +40,6 @@ def load() -> Config:
         state_db=state_db,
         default_repo=os.environ.get("AUTOBOT_DEFAULT_REPO") or None,
         max_diff_loc=int(os.environ.get("AUTOBOT_MAX_DIFF_LOC", "2000")),
-        revision_cap=int(os.environ.get("AUTOBOT_REVISION_CAP", "10")),
-        revision_cooldown_minutes=int(os.environ.get("AUTOBOT_REVISION_COOLDOWN_MINUTES", "20")),
     )
     for d in (config.inbox_dir, config.processing_dir, config.work_dir, config.results_dir, config.logs_dir, config.state_db.parent):
         d.mkdir(parents=True, exist_ok=True)
