@@ -4,7 +4,8 @@ from pathlib import Path
 from autobot.sources.base import Task
 
 # HTML comment Claude must include in PR bodies so the poll phase can confirm
-# a PR is one of autobot's before treating its comments as revision input.
+# a PR is one of autobot's before treating its comments as revision input. Also
+# the human "stop touching this PR" signal — remove the line and the bot stops.
 AUTOBOT_SENTINEL = "<!-- autobot -->"
 
 PROMPT_TEMPLATE = """\
@@ -98,48 +99,6 @@ Target repo: {repo} (clone URL: {clone_url})
 - Do not force-push. If you genuinely need to rewrite history, use
   `git push --force-with-lease` — never `--force` / `-f`.
 - The PR must be a draft (`--draft` flag).
-"""
-
-
-POLL_PROMPT_TEMPLATE = """\
-You are autobot, doing a cheap read-only poll on an open draft PR to detect
-new human comments since your last pass. Do NOT touch any files, branches,
-or PR state — this is purely a check.
-
-# Target
-
-PR: {pr_url}  (repo {repo}, number {pr_number})
-Last comment id you've already addressed: {last_comment_id}
-Result file: {result_file}
-
-# What to do
-
-1. Verify this is one of autobot's PRs and read its metadata:
-   `gh pr view {pr_number} --repo {repo} --json body,author`
-   - The body MUST contain the sentinel line on its own line:
-       {sentinel}
-     If it does NOT, write {{"status": "no_action"}} to {result_file} and stop.
-   - Note `author.login` — that's the identity to filter out below
-     (the bot's own comments don't count).
-
-2. Fetch the issue-style comment thread:
-   `gh api repos/{repo}/issues/{pr_number}/comments`
-
-3. Identify "new human comments" — comments where BOTH:
-   - `id > {last_comment_id}`  (use 0 if last_comment_id is null/missing), AND
-   - `user.login != <author.login from step 1>`  (skip self-comments)
-
-4. Write the result file at exactly {result_file}:
-   - If any comments qualified:
-       {{"status": "needs_revision", "last_comment_id": <max id of qualifying comments>}}
-   - If none qualified:
-       {{"status": "no_action"}}
-
-# Guardrails
-
-- Read-only pass. Do not edit files. Do not commit. Do not push. Do not
-  modify the PR. Do not invoke any tools beyond the two `gh` calls above
-  and the result-file write.
 """
 
 
@@ -245,15 +204,6 @@ class PromptInputs:
 
 
 @dataclass(frozen=True)
-class PollInputs:
-    repo: str
-    pr_url: str
-    pr_number: int
-    last_comment_id: int  # 0 on the first poll
-    result_file: Path
-
-
-@dataclass(frozen=True)
 class RevisionInputs:
     task: Task
     pr_url: str
@@ -280,17 +230,6 @@ def render_initial_prompt(inputs: PromptInputs) -> str:
         branch=inputs.branch,
         result_file=inputs.result_file,
         max_diff_loc=inputs.max_diff_loc,
-        sentinel=AUTOBOT_SENTINEL,
-    )
-
-
-def render_poll_prompt(inputs: PollInputs) -> str:
-    return POLL_PROMPT_TEMPLATE.format(
-        repo=inputs.repo,
-        pr_url=inputs.pr_url,
-        pr_number=inputs.pr_number,
-        last_comment_id=inputs.last_comment_id,
-        result_file=inputs.result_file,
         sentinel=AUTOBOT_SENTINEL,
     )
 

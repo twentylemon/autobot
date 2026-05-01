@@ -18,9 +18,12 @@ the next tick, revising the PR on the same branch.
 
 1. **Discover** — scan `~/.autobot/inbox/*.md`, insert any new tasks into
    `~/.autobot/state.db`.
-2. **Poll** — for each row in `submitted`, ask Claude to fetch the PR's
-   comments via `gh api` and report whether any new non-bot comments have
-   landed since `last_comment_id`. Transitions to `needs_revision` if so.
+2. **Poll** — for each row in `submitted`, shell `gh api` directly to
+   fetch the PR's comments, filter out the bot's own and any with
+   `id <= last_comment_id`, and verify the `<!-- autobot -->` sentinel
+   is still in the PR body (removing it is the human "stop touching
+   this PR" signal). Transitions to `needs_revision` if a new comment
+   qualifies. No LLM call — pure HTTP + JSON filtering.
 3. **Recover stale leases** — any row stuck in `revising` past the cutoff
    (default 30 min) is bumped back to `needs_revision` for retry.
 4. **Execute pending** — for each `pending` task, render the initial
@@ -96,7 +99,6 @@ locate `~/.claude/` and pick up your subscription credentials.
   results/<task>.json                # Claude's structured result
   results/<task>.json.error          # sidecar on failure
   logs/<task>.log                    # JSONL of SDK messages (initial run)
-  logs/<task>.poll-<utc-iso>.log     # one per poll invocation
   logs/<task>.revision-<n>.log       # one per revision pass
   state.db                           # SQLite task state
 ```

@@ -9,10 +9,11 @@ prompts from `prompts.py`, results from `results.py`, state writes from
 import dataclasses
 import json
 import logging
+import subprocess
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import AsyncIterator, Callable
+from typing import Any, AsyncIterator, Callable
 
 from claude_agent_sdk import (
     AssistantMessage,
@@ -26,7 +27,7 @@ from claude_agent_sdk.types import HookMatcher
 
 from autobot import results
 from autobot.config import Config
-from autobot.prompts import PollInputs, PromptInputs, RevisionInputs, render_initial_prompt, render_poll_prompt, render_revision_prompt
+from autobot.prompts import AUTOBOT_SENTINEL, PromptInputs, RevisionInputs, render_initial_prompt, render_revision_prompt
 from autobot.sdk_hooks import make_block_destructive_bash
 from autobot.sources.base import Task, TaskSource
 from autobot.state import State, TaskRow
@@ -220,49 +221,52 @@ def _apply_initial_result(
 # ---- Phase 2: Poll -------------------------------------------------------
 
 
-async def poll_pr(
+# Injectable for tests; in production we shell out to `gh` (already required + authed).
+GhFn = Callable[[list[str]], Any]
+
+
+def _default_gh(args: list[str]) -> Any:
+    proc = subprocess.run(["gh", *args], capture_output=True, text=True, check=True)
+    return json.loads(proc.stdout)
+
+
+def poll_pr(
     row: TaskRow,
     state: State,
     config: Config,
     *,
-    query_fn: QueryFn = _default_query,
+    gh_fn: GhFn = _default_gh,
 ) -> results.Result:
-    """Cheap poll on a submitted PR. Transitions submitted → needs_revision if a new
-    human comment exists; no-action polls are a true no-op."""
-    paths = compute_paths(row, config)
+    """Cheap poll on a submitted PR. Pure HTTP + JSON filtering — no LLM call.
+
+    Transitions submitted → needs_revision if a new non-bot comment exists past
+    `last_comment_id`. The `<!-- autobot -->` sentinel in the PR body is the
+    human "stop touching this PR" signal — if it's missing, we no-op.
+    """
     if row.pr_number is None or row.pr_url is None:
         log.warning("skipping poll for %s: no pr_number/pr_url recorded", row.id)
         return results.Unknown(reason="missing pr_number or pr_url")
 
-    poll_log = paths.log_file.with_name(f"{paths.log_file.stem}.poll-{_fs_safe_timestamp()}.log")
-    poll_result_file = paths.result_file.with_name(f"{paths.result_file.stem}.poll-{_fs_safe_timestamp()}.json")
-
-    prompt = render_poll_prompt(
-        PollInputs(
-            repo=row.repo,
-            pr_url=row.pr_url,
-            pr_number=row.pr_number,
-            last_comment_id=row.last_comment_id or 0,
-            result_file=poll_result_file,
-        )
-    )
-    options = _build_options(config, paths.canonical_dir)
-
     try:
-        await _stream_to_log(query_fn(prompt, options), poll_log)
-    except Exception as e:  # noqa: BLE001 - convert SDK failure to a no-op + warning
-        log.warning("poll SDK error for %s: %r", row.id, e)
-        return results.Unknown(reason=f"sdk error: {e!r}")
+        meta = gh_fn(["pr", "view", str(row.pr_number), "--repo", row.repo, "--json", "body,author"])
+        if AUTOBOT_SENTINEL not in (meta.get("body") or ""):
+            log.info("poll: %s missing autobot sentinel — no-op", row.id)
+            return results.NoAction()
+        author_login = meta["author"]["login"]
+        comments = gh_fn(["api", f"repos/{row.repo}/issues/{row.pr_number}/comments", "--paginate"])
+    except Exception as e:  # noqa: BLE001 - any gh failure is a no-op + warning
+        log.warning("poll gh error for %s: %r", row.id, e)
+        return results.Unknown(reason=f"gh error: {e!r}")
 
-    result = results.read(poll_result_file)
-    if isinstance(result, results.NeedsRevision):
-        state.record_poll_result(row.id, result.last_comment_id)
-        log.info("poll: %s has new comments (last_comment_id=%d)", row.id, result.last_comment_id)
-        return result
-    if isinstance(result, results.NoAction):
-        return result
-    log.warning("poll for %s returned unexpected result %r — leaving row unchanged", row.id, result)
-    return result
+    last = row.last_comment_id or 0
+    qualifying = [c for c in comments if c["id"] > last and c["user"]["login"] != author_login]
+    if not qualifying:
+        return results.NoAction()
+
+    new_last = max(c["id"] for c in qualifying)
+    state.record_poll_result(row.id, new_last)
+    log.info("poll: %s has %d new comment(s) (last_comment_id=%d)", row.id, len(qualifying), new_last)
+    return results.NeedsRevision(last_comment_id=new_last)
 
 
 # ---- Phase 3: Recover stale leases ---------------------------------------

@@ -45,12 +45,12 @@ def _ingest(source: LocalFileSource, state: State) -> int:
     return inserted
 
 
-async def _poll_open_prs(state: State, config: Config) -> int:
+def _poll_open_prs(state: State, config: Config) -> int:
     rows = state.get_submitted()
     for row in rows:
         log.info("polling task %s (pr=%s)", row.id, row.pr_url)
         try:
-            await worker.poll_pr(row, state, config)
+            worker.poll_pr(row, state, config)
         except Exception:
             log.exception("poll crashed on task %s", row.id)
     return len(rows)
@@ -95,14 +95,15 @@ def _tick(config: Config) -> None:
             log.error("inbox file rejected: %s", e)
             ingested = 0
 
-        async def run_phases() -> tuple[int, int, int, int]:
-            polled = await _poll_open_prs(state, config)
-            recovered = worker.recover_stale_leases(state)
+        polled = _poll_open_prs(state, config)
+        recovered = worker.recover_stale_leases(state)
+
+        async def run_async_phases() -> tuple[int, int]:
             executed = await _execute_pending(source, state, config)
             revised = await _execute_revisions(state, config)
-            return polled, recovered, executed, revised
+            return executed, revised
 
-        polled, recovered, executed, revised = asyncio.run(run_phases())
+        executed, revised = asyncio.run(run_async_phases())
         log.info(
             "tick complete: ingested=%d polled=%d recovered=%d executed=%d revised=%d",
             ingested, polled, recovered, executed, revised,

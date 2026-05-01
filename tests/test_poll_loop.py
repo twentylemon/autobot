@@ -1,12 +1,8 @@
-import asyncio
 from datetime import datetime, timezone
-from pathlib import Path
 
-from autobot import worker
+from autobot import results, worker
 from autobot.config import Config
 from autobot.state import State
-
-from tests.conftest import boom_query, fake_query
 
 
 def _submitted_row(state: State, task_id: str = "local:foo-abc123") -> None:
@@ -23,61 +19,97 @@ def _submitted_row(state: State, task_id: str = "local:foo-abc123") -> None:
                         pr_url="https://github.com/twentylemon/duckbot/pull/7", pr_number=7)
 
 
-def test_poll_with_new_comment_transitions_to_needs_revision(state: State, config: Config) -> None:
+def fake_gh(*, body: str = "<!-- autobot -->\n\nbody", author: str = "autobot[bot]", comments=()):
+    """Return a GhFn that dispatches based on the gh args.
+
+    The first arg distinguishes calls: `pr` → metadata, `api` → comments list.
+    """
+    def gh(args: list[str]):
+        if args[0] == "pr" and args[1] == "view":
+            return {"body": body, "author": {"login": author}}
+        if args[0] == "api":
+            return list(comments)
+        raise AssertionError(f"unexpected gh call: {args!r}")
+    return gh
+
+
+def boom_gh(message: str = "boom"):
+    def gh(args: list[str]):
+        raise RuntimeError(message)
+    return gh
+
+
+def test_poll_with_new_human_comment_transitions_to_needs_revision(state: State, config: Config) -> None:
     _submitted_row(state)
     row = state.get_by_id("local:foo-abc123")
-    payload = {"status": "needs_revision", "last_comment_id": 4242}
-    asyncio.run(worker.poll_pr(row, state, config, query_fn=fake_query(payload)))
+    comments = [{"id": 4242, "user": {"login": "alice"}}]
+    worker.poll_pr(row, state, config, gh_fn=fake_gh(comments=comments))
 
     final = state.get_by_id(row.id)
     assert final.status == "needs_revision"
     assert final.last_comment_id == 4242
 
 
-def test_poll_with_no_action_leaves_row_unchanged(state: State, config: Config) -> None:
+def test_poll_with_no_new_comments_leaves_row_unchanged(state: State, config: Config) -> None:
     _submitted_row(state)
     row = state.get_by_id("local:foo-abc123")
-    payload = {"status": "no_action"}
-    asyncio.run(worker.poll_pr(row, state, config, query_fn=fake_query(payload)))
+    worker.poll_pr(row, state, config, gh_fn=fake_gh(comments=[]))
 
     final = state.get_by_id(row.id)
     assert final.status == "submitted"
     assert final.last_comment_id is None
 
 
-def test_poll_writes_per_invocation_log(state: State, config: Config) -> None:
+def test_poll_filters_self_comments(state: State, config: Config) -> None:
     _submitted_row(state)
     row = state.get_by_id("local:foo-abc123")
-    asyncio.run(worker.poll_pr(row, state, config, query_fn=fake_query({"status": "no_action"})))
+    comments = [
+        {"id": 100, "user": {"login": "autobot[bot]"}},  # self — skip
+        {"id": 101, "user": {"login": "autobot[bot]"}},  # self — skip
+    ]
+    worker.poll_pr(row, state, config, gh_fn=fake_gh(author="autobot[bot]", comments=comments))
 
-    poll_logs = list(config.logs_dir.glob("foo-abc123.poll-*.log"))
-    assert len(poll_logs) == 1
+    assert state.get_by_id(row.id).status == "submitted"
 
 
-def test_poll_unexpected_result_leaves_row_unchanged(state: State, config: Config) -> None:
+def test_poll_filters_already_seen_comments(state: State, config: Config) -> None:
     _submitted_row(state)
+    state._conn.execute("UPDATE tasks SET last_comment_id = 200 WHERE id = 'local:foo-abc123'")
     row = state.get_by_id("local:foo-abc123")
-    # An initial-style "submitted" payload shouldn't come back from a poll.
-    payload = {"status": "submitted", "pr_url": "u", "pr_number": 1, "branch": "b", "head_sha": "s"}
-    asyncio.run(worker.poll_pr(row, state, config, query_fn=fake_query(payload)))
+    comments = [
+        {"id": 100, "user": {"login": "alice"}},  # too old
+        {"id": 200, "user": {"login": "alice"}},  # already seen
+        {"id": 201, "user": {"login": "alice"}},  # new
+    ]
+    worker.poll_pr(row, state, config, gh_fn=fake_gh(comments=comments))
 
     final = state.get_by_id(row.id)
-    assert final.status == "submitted"  # unchanged
-    assert final.last_comment_id is None
+    assert final.status == "needs_revision"
+    assert final.last_comment_id == 201
 
 
-def test_poll_sdk_crash_does_not_change_state(state: State, config: Config) -> None:
+def test_poll_no_op_when_sentinel_missing(state: State, config: Config) -> None:
     _submitted_row(state)
     row = state.get_by_id("local:foo-abc123")
-    asyncio.run(worker.poll_pr(row, state, config, query_fn=boom_query("api down")))
+    # Comments would qualify, but the sentinel is gone — human said "stop".
+    comments = [{"id": 999, "user": {"login": "alice"}}]
+    worker.poll_pr(row, state, config, gh_fn=fake_gh(body="just a normal PR body", comments=comments))
 
     final = state.get_by_id(row.id)
     assert final.status == "submitted"
+    assert final.last_comment_id is None
+
+
+def test_poll_gh_failure_does_not_change_state(state: State, config: Config) -> None:
+    _submitted_row(state)
+    row = state.get_by_id("local:foo-abc123")
+    result = worker.poll_pr(row, state, config, gh_fn=boom_gh("api down"))
+
+    assert isinstance(result, results.Unknown)
+    assert state.get_by_id(row.id).status == "submitted"
 
 
 def test_poll_skips_row_with_no_pr_number(state: State, config: Config) -> None:
-    from autobot import results
-
     state.insert_task(
         task_id="local:nopr",
         source="local_file", source_ref="/tmp/x.md", repo="twentylemon/duckbot",
@@ -87,7 +119,7 @@ def test_poll_skips_row_with_no_pr_number(state: State, config: Config) -> None:
     state._conn.execute("UPDATE tasks SET status='submitted' WHERE id='local:nopr'")
     row = state.get_by_id("local:nopr")
 
-    # boom_query would raise if poll_pr actually invoked the SDK.
-    result = asyncio.run(worker.poll_pr(row, state, config, query_fn=boom_query("should not be called")))
+    # boom_gh would raise if poll_pr actually called gh.
+    result = worker.poll_pr(row, state, config, gh_fn=boom_gh("should not be called"))
     assert isinstance(result, results.Unknown)
     assert "pr_number" in result.reason
