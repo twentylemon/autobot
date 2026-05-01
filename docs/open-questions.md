@@ -32,13 +32,14 @@ the path forward is either:
 - Add a per-day token budget guard in the worker so a runaway loop
   can't drain your subscription window.
 
-This becomes more urgent in v0.1: pure-agent-driven polling
-(see [`design/v0-1-pr-revision.md`](design/v0-1-pr-revision.md)) means
+Worth keeping in mind for v0.1: pure-agent-driven polling (see
+[`design/v0-1-pr-revision.md`](design/v0-1-pr-revision.md)) means
 every tick burns tokens for every open PR — one cheap poll-prompt
 invocation, plus a v0.2 reconcile-prompt invocation, per row. With N
 open PRs and a 10-minute tick interval, that's `N × 2 × 144` Claude
 invocations per day even when nothing's happening. The per-day budget
-guard should land alongside v0.1.
+guard isn't required to land with v0.1; revisit if real usage shows a
+cost problem.
 
 ### Bot identity
 

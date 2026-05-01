@@ -122,20 +122,40 @@ in `README.md`).
 
 ## Race-condition handling
 
-If Phase 4 (reconcile) detects a merge while a revision is in-flight
-in Phase 6 (revise), the row transitions to `completed` mid-pass.
-When the revision pass returns and tries to write its result, the
-state-update guard must silently no-op.
+Two race windows exist between Phase 4 (reconcile) and Phase 6
+(revise execution):
+
+**Window A — mid-revision merge.** Phase 6 has already transitioned a
+row `needs_revision → revising` and the SDK call is in-flight. Phase
+4 (next tick, or same tick if reconcile runs first) detects the merge
+and transitions `revising → completed`. When the revision pass
+returns, its result handler tries to write `revising → submitted` (or
+`needs_revision`), but the row is now terminal.
+
+**Window B — pre-revision merge.** Phase 6 has fetched the list of
+`needs_revision` rows for this tick. Phase 4 (running concurrently in
+a different tick, or in the brief window between Phase 6's fetch and
+its first `record_revision_start` call) transitions one of those rows
+to `completed`. Phase 6 then tries to transition `needs_revision →
+revising` for a row that's already terminal.
+
+Both windows resolve the same way: the state-update function silently
+no-ops if the source state is no longer the one we expected, instead
+of raising.
 
 Today, [`State.update_status`](../../autobot/state.py) raises if a
-row is in a terminal state. v0.2 needs to relax this for the
-specific case of `revising → submitted/needs_revision` writes when
-the row is now terminal — promote them to silent no-ops with a log
-warning instead of an exception.
+row is in a terminal state. v0.2 relaxes this for two specific cases,
+both promoted to silent no-ops with a log warning instead of an
+exception:
+
+- `revising → {submitted, needs_revision}` writes when the row is now
+  terminal (Window A).
+- `needs_revision → revising` writes when the row is now terminal
+  (Window B). `record_revision_start` checks this before invoking
+  Claude — if it's a no-op, skip the SDK call entirely.
 
 The unsafe case (terminal → some other terminal) stays an exception.
-The safe case (revision finished but already-merged) becomes a
-warning. Test coverage for this lives in
+Test coverage for both windows lives in
 `tests/test_reconcile_race_condition.py`.
 
 ## Runtime layout addition

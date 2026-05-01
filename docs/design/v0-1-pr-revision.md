@@ -155,11 +155,19 @@ Outline (full template lives in `prompts.py` once built):
 > The draft PR is at `{pr_url}` on branch `{branch}`. The existing
 > worktree is at `{worktree_dir}` — reuse it; do not re-clone.
 >
+> Run `cd {worktree_dir} && git status`. If there are uncommitted
+> changes, they're from a prior crashed revision pass — inspect them,
+> decide whether to keep, refine, or discard based on the comment
+> thread you're about to address, and commit or `git checkout`
+> accordingly before continuing.
+>
+> Refresh the base branch: `git fetch origin main`.
+>
 > Fetch the comment thread:
 > `gh api repos/{repo}/issues/{pr_number}/comments`
 >
-> Fetch the current diff:
-> `cd {worktree_dir} && git diff origin/main..HEAD`
+> Fetch the current diff against the freshly-fetched base:
+> `git diff origin/main..HEAD`
 >
 > Address the unresolved comments (those with `id > {last_comment_id}`
 > from non-bot authors) by editing files in the worktree. Commit with
@@ -208,12 +216,14 @@ git -C {worktree_dir} diff --shortstat origin/main..HEAD
 ```
 
 Parse the output (`N insertions(+), M deletions(-)`). If
-`N + M > 2500` (configurable via `AUTOBOT_MAX_DIFF_LOC`), do not push;
+`N + M > 2000` (configurable via `AUTOBOT_MAX_DIFF_LOC`), do not push;
 write a result `{status: 'failed_too_large', insertions: N, deletions: M}`.
 Worker transitions to `failed_too_large` (terminal).
 
-The current self-circuit-break in the prompt is at ~2000 LOC; this
-guard is a stricter, verifiable post-check. Belt-and-suspenders.
+This is the same threshold as the in-prompt self-circuit-break in
+v0's task prompt. The point of doing it again here is *verifiability*
+— the result file is self-reported, and `git diff --shortstat` is
+deterministic. Belt-and-suspenders, not stricter.
 
 ### 3. `PreToolUse` hook on `Bash` (worker-side SDK)
 
@@ -235,13 +245,19 @@ The hook function lives in `autobot/sdk_hooks.py` (new module — keeps
 it testable in isolation) and rejects `Bash` tool uses whose `command`
 matches:
 
-- `git push --force` (any flag form: `-f`, `--force`, `--force-with-lease`).
+- `git push --force` and `-f` (the unconditional forms).
 - `git reset --hard`.
 - `rm -rf` of any path under the canonical clone (`work/.../main/`).
 - Direct writes under any `.git/` directory.
 
+`git push --force-with-lease` is **allowed** — it fails if the remote
+ref has been updated since Claude last fetched, so it's the safe form
+to use after a rebase. Blocking it would prevent Claude from doing
+the right thing on a revision that needed a rebase.
+
 On rejection, the hook returns a tool-use error so Claude sees the
-failure in-context and can adapt (e.g., `git push` without `--force`).
+failure in-context and can adapt (e.g., switch from `--force` to
+`--force-with-lease`).
 
 ## Bot identity caveat
 
