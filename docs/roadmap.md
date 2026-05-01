@@ -21,17 +21,28 @@ I actually want." Today a flawed PR means closing it and dropping a
 refined task file in `inbox/`. v0.1 makes the loop conversational.
 
 **Scope — in.**
-- Poll bot-authored PRs each tick via `PyGithub` (already a dep).
+- Pure agent-driven polling: Claude shells `gh api` from the worker's
+  poll prompt (no PyGithub).
 - Identify new human comments since the last revision (filter by
-  comment author + the `<!-- autobot -->` sentinel in the PR body).
-- Build a revision prompt: original task + full thread + current diff,
-  invoke a fresh `query()` per revision (stateless; survives restarts).
-- New `pr_revisions` table to track per-PR revision count and last-seen
-  comment id.
+  `comment.user.login != PR.user.login` + the `<!-- autobot -->`
+  sentinel in the PR body).
+- Richer state machine: new `needs_revision` and `revising` states
+  plus `failed_revision` and `failed_too_large` terminals; stale-lease
+  recovery for crashed revisions.
+- Build a revision prompt: original task + comment thread + current
+  diff (Claude fetches both itself), invoke a fresh `query()` per
+  revision (stateless; survives restarts).
+- Three new columns on `tasks` (`last_comment_id`, `revision_count`,
+  `last_revision_at`) — no separate revision table.
 - Rate limits: ~3 revisions/hour/PR, hard cap ~10 total/PR.
+- Worker-side hardening folded in: PR-draft sanity check (in prompt),
+  sprawling-diff guard (in prompt), `PreToolUse` hook on `Bash`
+  (worker-side SDK).
 
 **Scope — out.** Inline review-comment threading; CI-failure auto-retry;
 non-PR destinations (see v0.3).
+
+**Design.** See [`design/v0-1-pr-revision.md`](design/v0-1-pr-revision.md).
 
 **Status.** Planned.
 
@@ -47,12 +58,18 @@ accumulate; the source file sits in `processing/` forever; state.db
 doesn't know what's live.
 
 **Scope — in.**
-- Polling-based merge check (no webhooks).
-- Worktree cleanup on merge.
-- New `done/` directory for completed source files.
+- Polling-based reconcile (Claude shells `gh pr view`); no webhooks.
+- New terminal states: `completed` (merged) and `abandoned`
+  (closed-without-merge), reachable from `submitted`,
+  `needs_revision`, or `revising`.
+- Worktree cleanup on either terminal.
+- New `done/` directory for archived source files.
+- Race-condition handling for revisions in-flight at merge time.
 
 **Scope — out.** Reverting on revert; tracking the merged commit SHA
 back to anything beyond state.db.
+
+**Design.** See [`design/v0-2-merge-detection.md`](design/v0-2-merge-detection.md).
 
 **Status.** Planned.
 

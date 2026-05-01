@@ -32,8 +32,14 @@ the path forward is either:
 - Add a per-day token budget guard in the worker so a runaway loop
   can't drain your subscription window.
 
-Either is worth doing before enabling the revision loop in v0.1, which
-will dramatically increase token volume per task.
+Worth keeping in mind for v0.1: pure-agent-driven polling (see
+[`design/v0-1-pr-revision.md`](design/v0-1-pr-revision.md)) means
+every tick burns tokens for every open PR — one cheap poll-prompt
+invocation, plus a v0.2 reconcile-prompt invocation, per row. With N
+open PRs and a 10-minute tick interval, that's `N × 2 × 144` Claude
+invocations per day even when nothing's happening. The per-day budget
+guard isn't required to land with v0.1; revisit if real usage shows a
+cost problem.
 
 ### Bot identity
 
@@ -45,26 +51,10 @@ enables the human-vs-bot comment filter in v0.1 (filter `comment.user
 
 ## Open — revisit when v0.1 lands
 
-### PR-draft sanity check
-
-The result file says `submitted` but doesn't guarantee `--draft` was
-honored. v0.1 has `PyGithub` available — add a worker-side check via
-`pr_url`/`pr_number` and either flip back to draft or surface a
-warning if Claude forgot the flag.
-
-### Sprawling-diff belt-and-suspenders
-
-v0 trusts Claude to self-circuit-break at ~2000 LOC (per the prompt
-guardrail). v0.1 should add a worker-side check (`git diff --stat
-main..head`) and refuse to mark `submitted` past a threshold, since
-the result file is self-reported.
-
-### `PreToolUse` hook on `Bash`
-
-Today only the prompt guards against destructive git invocations
-(`push --force`, `reset --hard`, anything touching the canonical
-clone). The Claude Agent SDK supports `PreToolUse` hooks — wire one
-up to deny these patterns regardless of what the model decides to do.
+The PR-draft sanity check, sprawling-diff guard, and `PreToolUse`
+hook on `Bash` previously listed here are now designed in
+[`design/v0-1-pr-revision.md`](design/v0-1-pr-revision.md) under
+"Worker-side hardening" — they ride along with the v0.1 surface area.
 
 ### Other potentially-stallable tools
 
