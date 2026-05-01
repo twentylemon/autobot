@@ -229,18 +229,19 @@ class State:
                 (_now(), task_id),
             )
 
-    def record_revision_result(self, task_id: str, last_comment_id: int) -> None:
+    def record_revision_result(self, task_id: str, last_comment_id: int, *, session_id: str | None = None) -> None:
         """Phase 6 dispatch: a revision succeeded — back to `submitted`, count it, stamp metadata.
 
         head_sha lives in the result file on disk for audit; state.db only tracks
-        what the state machine needs.
+        what the state machine needs. session_id is COALESCE'd so a None caller
+        doesn't clobber a previously-stamped value.
         """
         with self._tx() as c:
             self._guard_transition(c, task_id, "revising", "submitted")
             c.execute(
                 "UPDATE tasks SET status = 'submitted', revision_count = revision_count + 1, "
-                "last_comment_id = ?, updated_at = ? WHERE id = ?",
-                (last_comment_id, _now(), task_id),
+                "last_comment_id = ?, session_id = COALESCE(?, session_id), updated_at = ? WHERE id = ?",
+                (last_comment_id, session_id, _now(), task_id),
             )
 
     def _guard_transition(self, c: sqlite3.Connection, task_id: str, expected: str, target: str) -> None:

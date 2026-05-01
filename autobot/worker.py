@@ -11,7 +11,7 @@ import json
 import logging
 import subprocess
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, AsyncIterator, Callable
 
@@ -280,7 +280,7 @@ def recover_stale_leases(state: State, *, cutoff_minutes: int = 30) -> int:
     A row gets stuck in `revising` when the worker crashes mid-revision; without
     this recovery step the row would never get retried.
     """
-    cutoff = datetime.now(timezone.utc) - _minutes(cutoff_minutes)
+    cutoff = datetime.now(timezone.utc) - timedelta(minutes=cutoff_minutes)
     stale = state.get_stale_revising(cutoff)
     for row in stale:
         log.warning("stale-lease recovery: %s revising since %s — back to needs_revision", row.id, row.updated_at.isoformat())
@@ -289,12 +289,6 @@ def recover_stale_leases(state: State, *, cutoff_minutes: int = 30) -> int:
         except Exception:
             log.exception("recover crashed on task %s", row.id)
     return len(stale)
-
-
-def _minutes(n: int):
-    from datetime import timedelta
-
-    return timedelta(minutes=n)
 
 
 # ---- Phase 6: Execute revisions ------------------------------------------
@@ -369,10 +363,7 @@ def _apply_revision_result(
     log_file: Path,
 ) -> None:
     if isinstance(result, results.Revised):
-        state.record_revision_result(task_id, last_comment_id=result.last_comment_id)
-        if session_id:
-            # Stamp the latest session_id without changing status.
-            state.update_status(task_id, "submitted", session_id=session_id)
+        state.record_revision_result(task_id, last_comment_id=result.last_comment_id, session_id=session_id)
         return
     if isinstance(result, results.NeedsRevision):
         # Mid-pass: new comments arrived. Don't bump revision_count; just queue another pass.

@@ -160,6 +160,19 @@ def test_no_changes_result_transitions_and_writes_sidecar(state: State, config: 
     assert "nothing to do" in sidecar.read_text(encoding="utf-8")
 
 
+def test_failed_too_large_initial_run_terminates(state: State, config: Config) -> None:
+    _seed(state)
+    row = state.get_by_id("local:foo-abc123")
+    src = FakeSource()
+    paths = worker.compute_paths(row, config)
+    payload = {"status": "failed_too_large", "insertions": 1500, "deletions": 800}
+    asyncio.run(worker.execute_task(row, src, state, config, query_fn=_fake_query(paths.result_file, payload)))
+    assert state.get_by_id(row.id).status == "failed_too_large"
+    sidecar = paths.result_file.with_suffix(".json.error")
+    assert sidecar.exists()
+    assert "1500" in sidecar.read_text(encoding="utf-8")
+
+
 def test_no_pr_result_records_branch(state: State, config: Config) -> None:
     _seed(state)
     row = state.get_by_id("local:foo-abc123")
