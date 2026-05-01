@@ -11,6 +11,7 @@ STATUSES = {
     "submitted",
     "needs_revision",
     "revising",
+    "completed",
     "failed_no_changes",
     "failed_no_pr",
     "failed_too_large",
@@ -18,6 +19,7 @@ STATUSES = {
     "failed_unknown",
 }
 TERMINAL_STATUSES = {
+    "completed",
     "failed_no_changes",
     "failed_no_pr",
     "failed_too_large",
@@ -27,11 +29,13 @@ TERMINAL_STATUSES = {
 
 # Explicit transition table. A status is allowed to transition to itself
 # (idempotent) on top of these rules. Anything not listed raises ValueError.
+# `completed` = "PR is no longer ours" (user closed, merged, or marked ready
+# for review). It can be reached from any active state.
 ALLOWED_TRANSITIONS: dict[str, set[str]] = {
     "pending": {"submitted", "failed_no_changes", "failed_no_pr", "failed_too_large", "failed_unknown"},
-    "submitted": {"needs_revision"},
-    "needs_revision": {"revising"},
-    "revising": {"submitted", "needs_revision", "failed_revision", "failed_too_large"},
+    "submitted": {"needs_revision", "completed"},
+    "needs_revision": {"revising", "completed"},
+    "revising": {"submitted", "needs_revision", "completed", "failed_revision", "failed_too_large"},
 }
 
 

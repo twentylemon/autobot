@@ -151,6 +151,38 @@ def test_record_revision_result_increments_count_and_returns_to_submitted(state:
     assert row.last_comment_id == 99
 
 
+def test_submitted_to_completed_is_allowed(state: State) -> None:
+    _seed(state)
+    _to_submitted(state)
+    state.update_status("local:foo", "completed")
+    assert state.get_by_id("local:foo").status == "completed"
+
+
+def test_needs_revision_to_completed_is_allowed(state: State) -> None:
+    _seed(state)
+    _to_submitted(state)
+    state.update_status("local:foo", "needs_revision")
+    state.update_status("local:foo", "completed")
+    assert state.get_by_id("local:foo").status == "completed"
+
+
+def test_revising_to_completed_is_allowed(state: State) -> None:
+    _seed(state)
+    _to_submitted(state)
+    state.update_status("local:foo", "needs_revision")
+    state.update_status("local:foo", "revising")
+    state.update_status("local:foo", "completed")
+    assert state.get_by_id("local:foo").status == "completed"
+
+
+def test_completed_is_terminal(state: State) -> None:
+    _seed(state)
+    _to_submitted(state)
+    state.update_status("local:foo", "completed")
+    with pytest.raises(ValueError, match="terminal state"):
+        state.update_status("local:foo", "needs_revision")
+
+
 def test_record_revision_result_increments_each_pass(state: State) -> None:
     _seed(state)
     _to_submitted(state)

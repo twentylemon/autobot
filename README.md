@@ -18,12 +18,13 @@ the next tick, revising the PR on the same branch.
 
 1. **Discover** — scan `~/.autobot/inbox/*.md`, insert any new tasks into
    `~/.autobot/state.db`.
-2. **Poll** — for each row in `submitted`, shell `gh api` directly to
-   fetch the PR's comments, filter out the bot's own and any with
-   `id <= last_comment_id`, and verify the `<!-- autobot -->` sentinel
-   is still in the PR body (removing it is the human "stop touching
-   this PR" signal). Transitions to `needs_revision` if a new comment
-   qualifies. No LLM call — pure HTTP + JSON filtering.
+2. **Poll** — for each row in `submitted`, shell `gh` directly to
+   fetch PR metadata + comments. If the PR is no longer draft+open
+   (closed, merged, or marked ready for review), the user has taken
+   over — transition to `completed` and stop. Otherwise filter out
+   the bot's own comments and any with `id <= last_comment_id`;
+   transition to `needs_revision` if a new comment qualifies. No LLM
+   call — pure HTTP + JSON filtering.
 3. **Recover stale leases** — any row stuck in `revising` past the cutoff
    (default 30 min) is bumped back to `needs_revision` for retry.
 4. **Execute pending** — for each `pending` task, render the initial
@@ -105,6 +106,9 @@ locate `~/.claude/` and pick up your subscription credentials.
 
 ## Recovery
 
+- **Task in `completed`:** terminal — the user took over the PR (closed,
+  merged, or marked it ready for review). No action needed; the row stays
+  for audit. To reopen iteration, drop a new task file.
 - **Task stuck pending after a crash:** worker moved the source file to
   `processing/` before invoking Claude, so `--once` will not re-pick it.
   Manually move it back to `inbox/` and delete the row from `state.db`.

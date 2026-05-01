@@ -77,3 +77,17 @@ def boom_query(message: str = "boom"):
         return gen()
 
     return factory
+
+
+def ok_gh(*, is_draft: bool = True, state: str = "OPEN"):
+    """Build a gh_fn that satisfies revise_task's isDraft+state pre-check.
+
+    Tests that don't care about the pre-check just pass `gh_fn=ok_gh()`.
+    """
+
+    def gh(args: list[str]):
+        if args[0] == "pr" and args[1] == "view":
+            return {"isDraft": is_draft, "state": state}
+        raise AssertionError(f"unexpected gh call in revision test: {args!r}")
+
+    return gh

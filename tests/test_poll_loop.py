@@ -19,14 +19,14 @@ def _submitted_row(state: State, task_id: str = "local:foo-abc123") -> None:
                         pr_url="https://github.com/twentylemon/duckbot/pull/7", pr_number=7)
 
 
-def fake_gh(*, body: str = "<!-- autobot -->\n\nbody", author: str = "autobot[bot]", comments=()):
+def fake_gh(*, is_draft: bool = True, state: str = "OPEN", author: str = "autobot[bot]", comments=()):
     """Return a GhFn that dispatches based on the gh args.
 
     The first arg distinguishes calls: `pr` → metadata, `api` → comments list.
     """
     def gh(args: list[str]):
         if args[0] == "pr" and args[1] == "view":
-            return {"body": body, "author": {"login": author}}
+            return {"isDraft": is_draft, "state": state, "author": {"login": author}}
         if args[0] == "api":
             return list(comments)
         raise AssertionError(f"unexpected gh call: {args!r}")
@@ -88,16 +88,33 @@ def test_poll_filters_already_seen_comments(state: State, config: Config) -> Non
     assert final.last_comment_id == 201
 
 
-def test_poll_no_op_when_sentinel_missing(state: State, config: Config) -> None:
+def test_poll_marks_completed_when_pr_closed(state: State, config: Config) -> None:
     _submitted_row(state)
     row = state.get_by_id("local:foo-abc123")
-    # Comments would qualify, but the sentinel is gone — human said "stop".
+    # Comments would qualify, but the user closed the PR — that's their "I'm taking over" signal.
     comments = [{"id": 999, "user": {"login": "alice"}}]
-    worker.poll_pr(row, state, config, gh_fn=fake_gh(body="just a normal PR body", comments=comments))
+    worker.poll_pr(row, state, config, gh_fn=fake_gh(state="CLOSED", comments=comments))
 
     final = state.get_by_id(row.id)
-    assert final.status == "submitted"
+    assert final.status == "completed"
     assert final.last_comment_id is None
+
+
+def test_poll_marks_completed_when_pr_marked_ready_for_review(state: State, config: Config) -> None:
+    _submitted_row(state)
+    row = state.get_by_id("local:foo-abc123")
+    comments = [{"id": 999, "user": {"login": "alice"}}]
+    worker.poll_pr(row, state, config, gh_fn=fake_gh(is_draft=False, comments=comments))
+
+    assert state.get_by_id(row.id).status == "completed"
+
+
+def test_poll_marks_completed_when_pr_merged(state: State, config: Config) -> None:
+    _submitted_row(state)
+    row = state.get_by_id("local:foo-abc123")
+    worker.poll_pr(row, state, config, gh_fn=fake_gh(state="MERGED"))
+
+    assert state.get_by_id(row.id).status == "completed"
 
 
 def test_poll_gh_failure_does_not_change_state(state: State, config: Config) -> None:

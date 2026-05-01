@@ -3,11 +3,6 @@ from pathlib import Path
 
 from autobot.sources.base import Task
 
-# HTML comment Claude must include in PR bodies so the poll phase can confirm
-# a PR is one of autobot's before treating its comments as revision input. Also
-# the human "stop touching this PR" signal — remove the line and the bot stops.
-AUTOBOT_SENTINEL = "<!-- autobot -->"
-
 PROMPT_TEMPLATE = """\
 You are autobot, an autonomous coding agent. The user has dropped a task in
 their inbox and wants you to open a draft pull request that addresses it.
@@ -51,26 +46,17 @@ Target repo: {repo} (clone URL: {clone_url})
 5. Sprawling-diff guard. BEFORE pushing, run:
    `git -C {worktree_dir} diff --shortstat origin/main..HEAD`
    Parse the `N insertions(+), M deletions(-)` numbers. If
-   `N + M > {max_diff_loc}`, do NOT push. Skip to step 9 and write a
+   `N + M > {max_diff_loc}`, do NOT push. Skip to step 8 and write a
    `failed_too_large` result with the actual N and M.
 
 6. Push: `git push -u origin {branch}`.
 
 7. Open a DRAFT pull request:
    `gh pr create --draft --title "<concise title>" --body "<body>"`
-   The body MUST include this sentinel line on its own line so the service
-   can later distinguish bot-authored content from human comments:
-       {sentinel}
-   The body should also include the original task description verbatim
-   under a "## Original task" heading, so the PR is self-explanatory.
+   The body should include the original task description verbatim under
+   a "## Original task" heading, so the PR is self-explanatory.
 
-8. PR-draft sanity check. After creation, run:
-   `gh pr view <pr_number> --repo {repo} --json isDraft`
-   If `isDraft == false`, run `gh pr ready --undo <pr_number> --repo {repo}`
-   and re-check. If still not draft, write a `no_pr` result with reason
-   "could not restore draft state".
-
-9. Write the result file at exactly {result_file} with one of these JSON
+8. Write the result file at exactly {result_file} with one of these JSON
    shapes (and nothing else). This file is how the service knows what
    happened. Write it LAST.
 
@@ -85,7 +71,7 @@ Target repo: {repo} (clone URL: {clone_url})
      {{"status": "failed_too_large", "insertions": <N>, "deletions": <M>}}
 
    If you decide the task is already satisfied or there's nothing to change,
-   skip steps 4-8 and write:
+   skip steps 4-7 and write:
      {{"status": "no_changes", "reason": "<one sentence>"}}
 
    If you committed and tried to push or open the PR but it failed and you
@@ -98,7 +84,9 @@ Target repo: {repo} (clone URL: {clone_url})
 - Do not push to or modify `main` on the remote.
 - Do not force-push. If you genuinely need to rewrite history, use
   `git push --force-with-lease` — never `--force` / `-f`.
-- The PR must be a draft (`--draft` flag).
+- The PR must be opened as a draft (`--draft` flag). The user marks it
+  ready for review when they're done iterating — that's their signal
+  for autobot to stop touching it.
 """
 
 
@@ -157,31 +145,25 @@ PR: {pr_url}  (number {pr_number})
    - If you genuinely rebased on origin/main and need to rewrite history:
      `git push --force-with-lease origin {branch}` (NEVER `--force`).
 
-8. PR-draft sanity check:
-   `gh pr view {pr_number} --repo {repo} --json isDraft`
-   If `isDraft == false`, run `gh pr ready --undo {pr_number} --repo {repo}`
-   and re-check. If still not draft, write a `no_pr` result with reason
-   "could not restore draft state".
-
-9. Re-fetch comments to see if NEW ones arrived during your pass:
+8. Re-fetch comments to see if NEW ones arrived during your pass:
    `gh api repos/{repo}/issues/{pr_number}/comments`
    Compare against the set you addressed in step 5.
 
-10. Write the result file at exactly {result_file} with one of these shapes:
+9. Write the result file at exactly {result_file} with one of these shapes:
 
-    On success (you pushed and addressed all qualifying comments):
-      {{"status": "revised",
-        "last_comment_id": <max id you addressed>,
-        "head_sha": "<git rev-parse HEAD>"}}
+   On success (you pushed and addressed all qualifying comments):
+     {{"status": "revised",
+       "last_comment_id": <max id you addressed>,
+       "head_sha": "<git rev-parse HEAD>"}}
 
-    If new comments arrived during your pass and you did NOT address them:
-      {{"status": "needs_revision", "last_comment_id": <max id you DID address>}}
+   If new comments arrived during your pass and you did NOT address them:
+     {{"status": "needs_revision", "last_comment_id": <max id you DID address>}}
 
-    If the diff exceeded the threshold in step 6:
-      {{"status": "failed_too_large", "insertions": <N>, "deletions": <M>}}
+   If the diff exceeded the threshold in step 6:
+     {{"status": "failed_too_large", "insertions": <N>, "deletions": <M>}}
 
-    If the push or PR-draft check failed and you couldn't recover:
-      {{"status": "no_pr", "reason": "<what failed>", "branch": "{branch}"}}
+   If the push failed and you couldn't recover:
+     {{"status": "no_pr", "reason": "<what failed>", "branch": "{branch}"}}
 
 # Guardrails
 
@@ -189,7 +171,8 @@ PR: {pr_url}  (number {pr_number})
 - Do not modify or delete the canonical clone.
 - Do not push to or modify `main` on the remote.
 - Use `--force-with-lease` only — never `--force` / `-f`. (The worker enforces this.)
-- The PR must remain a draft.
+- Do not flip the PR out of draft state. The user does that when they're
+  ready to take over — and that's their signal for autobot to stop.
 """
 
 
@@ -230,7 +213,6 @@ def render_initial_prompt(inputs: PromptInputs) -> str:
         branch=inputs.branch,
         result_file=inputs.result_file,
         max_diff_loc=inputs.max_diff_loc,
-        sentinel=AUTOBOT_SENTINEL,
     )
 
 

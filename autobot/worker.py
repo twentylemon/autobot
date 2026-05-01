@@ -27,7 +27,7 @@ from claude_agent_sdk.types import HookMatcher
 
 from autobot import results
 from autobot.config import Config
-from autobot.prompts import AUTOBOT_SENTINEL, PromptInputs, RevisionInputs, render_initial_prompt, render_revision_prompt
+from autobot.prompts import PromptInputs, RevisionInputs, render_initial_prompt, render_revision_prompt
 from autobot.sdk_hooks import make_block_destructive_bash
 from autobot.sources.base import Task, TaskSource
 from autobot.state import State, TaskRow
@@ -240,17 +240,19 @@ def poll_pr(
     """Cheap poll on a submitted PR. Pure HTTP + JSON filtering — no LLM call.
 
     Transitions submitted → needs_revision if a new non-bot comment exists past
-    `last_comment_id`. The `<!-- autobot -->` sentinel in the PR body is the
-    human "stop touching this PR" signal — if it's missing, we no-op.
+    `last_comment_id`. If the PR has left draft+open state (closed, merged, or
+    marked ready for review), the user has taken over — transition to `completed`.
     """
     if row.pr_number is None or row.pr_url is None:
         log.warning("skipping poll for %s: no pr_number/pr_url recorded", row.id)
         return results.Unknown(reason="missing pr_number or pr_url")
 
     try:
-        meta = gh_fn(["pr", "view", str(row.pr_number), "--repo", row.repo, "--json", "body,author"])
-        if AUTOBOT_SENTINEL not in (meta.get("body") or ""):
-            log.info("poll: %s missing autobot sentinel — no-op", row.id)
+        meta = gh_fn(["pr", "view", str(row.pr_number), "--repo", row.repo, "--json", "isDraft,state,author"])
+        if meta.get("state") != "OPEN" or not meta.get("isDraft"):
+            log.info("poll: %s no longer managed (state=%s isDraft=%s) — marking completed",
+                     row.id, meta.get("state"), meta.get("isDraft"))
+            state.update_status(row.id, "completed")
             return results.NoAction()
         author_login = meta["author"]["login"]
         comments = gh_fn(["api", f"repos/{row.repo}/issues/{row.pr_number}/comments", "--paginate"])
@@ -304,11 +306,26 @@ async def revise_task(
     config: Config,
     *,
     query_fn: QueryFn = _default_query,
+    gh_fn: GhFn = _default_gh,
 ) -> results.Result:
     """Run one revision pass for a `needs_revision` row. Per-PR rate is bounded
     naturally: only one row per PR is in `needs_revision` at a time, and the
     next revision can't start until this one finishes (or stale-lease recovery
     bumps it back)."""
+    # Pre-check: if the user has taken the PR out of draft+open state, hand it
+    # back without burning an SDK call. Cheaper than discovering it inside Claude.
+    if row.pr_number is not None:
+        try:
+            meta = gh_fn(["pr", "view", str(row.pr_number), "--repo", row.repo, "--json", "isDraft,state"])
+        except Exception as e:  # noqa: BLE001 - skip this tick, retry next
+            log.warning("revision pre-check gh error for %s: %r", row.id, e)
+            return results.Unknown(reason=f"gh pre-check error: {e!r}")
+        if meta.get("state") != "OPEN" or not meta.get("isDraft"):
+            log.info("revision: %s no longer managed (state=%s isDraft=%s) — marking completed",
+                     row.id, meta.get("state"), meta.get("isDraft"))
+            state.update_status(row.id, "completed")
+            return results.NoAction()
+
     paths = compute_paths(row, config)
     state.record_revision_start(row.id)
     revision_n = row.revision_count + 1
