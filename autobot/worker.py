@@ -278,7 +278,10 @@ def recover_stale_leases(state: State, *, cutoff_minutes: int = 30) -> int:
     stale = state.get_stale_revising(cutoff)
     for row in stale:
         log.warning("stale-lease recovery: %s revising since %s — back to needs_revision", row.id, row.updated_at.isoformat())
-        state.update_status(row.id, "needs_revision")
+        try:
+            state.update_status(row.id, "needs_revision")
+        except Exception:
+            log.exception("recover crashed on task %s", row.id)
     return len(stale)
 
 

@@ -78,27 +78,13 @@ async def _execute_revisions(state: State, config: Config) -> int:
     return len(rows)
 
 
-def _safe(name: str, fn, *args):
-    try:
-        return fn(*args)
-    except Exception:
-        log.exception("phase %s failed", name)
-        return 0
-
-
-async def _safe_async(name: str, fn, *args):
-    try:
-        return await fn(*args)
-    except Exception:
-        log.exception("phase %s failed", name)
-        return 0
-
-
 def _tick(config: Config) -> None:
     """Per-tick phases: discover → poll → recover → execute pending → execute revisions.
 
-    Each phase is isolated so a failure in one doesn't block the rest.
-    (v0.2 will slot a reconcile phase between recover and execute pending.)
+    Per-task failures inside each phase are caught and logged with task id +
+    phase verb + traceback, so one bad row doesn't skip the rest of its phase
+    or block subsequent phases. (v0.2 will slot a reconcile phase between
+    recover and execute pending.)
     """
     source = _build_source(config)
     state = State(config.state_db)
@@ -110,10 +96,10 @@ def _tick(config: Config) -> None:
             ingested = 0
 
         async def run_phases() -> tuple[int, int, int, int]:
-            polled = await _safe_async("poll", _poll_open_prs, state, config)
-            recovered = _safe("recover_stale_leases", worker.recover_stale_leases, state)
-            executed = await _safe_async("execute_pending", _execute_pending, source, state, config)
-            revised = await _safe_async("execute_revisions", _execute_revisions, state, config)
+            polled = await _poll_open_prs(state, config)
+            recovered = worker.recover_stale_leases(state)
+            executed = await _execute_pending(source, state, config)
+            revised = await _execute_revisions(state, config)
             return polled, recovered, executed, revised
 
         polled, recovered, executed, revised = asyncio.run(run_phases())
