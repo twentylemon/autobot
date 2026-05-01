@@ -41,6 +41,9 @@ def config(tmp_path: Path) -> Config:
         logs_dir=home / "logs",
         state_db=home / "state.db",
         default_repo=None,
+        max_diff_loc=2000,
+        revision_cap=10,
+        revision_cooldown_minutes=20,
     )
 
 
@@ -114,6 +117,9 @@ def _row(config: Config, repo: str, task_id: str):
         pr_url=None,
         pr_number=None,
         session_id=None,
+        last_comment_id=None,
+        revision_count=0,
+        last_revision_at=None,
         created_at=datetime(2026, 4, 30, tzinfo=timezone.utc),
         updated_at=datetime(2026, 4, 30, tzinfo=timezone.utc),
     )
