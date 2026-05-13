@@ -20,7 +20,6 @@ Target repo: {repo} (clone URL: {clone_url})
 - Per-task worktree: {worktree_dir}
 - Feature branch:    {branch}
 - Result file:       {result_file}
-- Sprawling-diff threshold (insertions + deletions): {max_diff_loc}
 
 # What to do — follow these steps in order
 
@@ -43,20 +42,14 @@ Target repo: {repo} (clone URL: {clone_url})
 4. Commit your work on the feature branch with a clear message. Multiple
    commits are fine if the work splits naturally.
 
-5. Sprawling-diff guard. BEFORE pushing, run:
-   `git -C {worktree_dir} diff --shortstat origin/main..HEAD`
-   Parse the `N insertions(+), M deletions(-)` numbers. If
-   `N + M > {max_diff_loc}`, do NOT push. Skip to step 8 and write a
-   `failed_too_large` result with the actual N and M.
+5. Push: `git push -u origin {branch}`.
 
-6. Push: `git push -u origin {branch}`.
-
-7. Open a DRAFT pull request:
+6. Open a DRAFT pull request:
    `gh pr create --draft --title "<concise title>" --body "<body>"`
    The body should include the original task description verbatim under
    a "## Original task" heading, so the PR is self-explanatory.
 
-8. Write the result file at exactly {result_file} with one of these JSON
+7. Write the result file at exactly {result_file} with one of these JSON
    shapes (and nothing else). This file is how the service knows what
    happened. Write it LAST.
 
@@ -67,11 +60,8 @@ Target repo: {repo} (clone URL: {clone_url})
        "branch": "{branch}",
        "head_sha": "<git rev-parse HEAD in the worktree>"}}
 
-   If the diff exceeded the threshold in step 5:
-     {{"status": "failed_too_large", "insertions": <N>, "deletions": <M>}}
-
    If you decide the task is already satisfied or there's nothing to change,
-   skip steps 4-7 and write:
+   skip steps 4-6 and write:
      {{"status": "no_changes", "reason": "<one sentence>"}}
 
    If you committed and tried to push or open the PR but it failed and you
@@ -108,7 +98,6 @@ PR: {pr_url}  (number {pr_number})
 - Feature branch:                    {branch}
 - Last comment id you addressed:     {last_comment_id}
 - Result file:                       {result_file}
-- Sprawling-diff threshold (insertions + deletions): {max_diff_loc}
 
 # What to do — follow these steps in order
 
@@ -135,21 +124,16 @@ PR: {pr_url}  (number {pr_number})
    Edit files in the worktree to address them. Commit with a message that
    summarizes which comments you addressed (one sentence per topic is fine).
 
-6. Sprawling-diff guard. BEFORE pushing, run:
-   `git -C {worktree_dir} diff --shortstat origin/main..HEAD`
-   Parse `N insertions(+), M deletions(-)`. If `N + M > {max_diff_loc}`,
-   do NOT push. Skip to step 9 and write a `failed_too_large` result.
-
-7. Push the branch:
+6. Push the branch:
    - Preferred: `git push origin {branch}`
    - If you genuinely rebased on origin/main and need to rewrite history:
      `git push --force-with-lease origin {branch}` (NEVER `--force`).
 
-8. Re-fetch comments to see if NEW ones arrived during your pass:
+7. Re-fetch comments to see if NEW ones arrived during your pass:
    `gh api repos/{repo}/issues/{pr_number}/comments`
    Compare against the set you addressed in step 5.
 
-9. Write the result file at exactly {result_file} with one of these shapes:
+8. Write the result file at exactly {result_file} with one of these shapes:
 
    On success (you pushed and addressed all qualifying comments):
      {{"status": "revised",
@@ -158,9 +142,6 @@ PR: {pr_url}  (number {pr_number})
 
    If new comments arrived during your pass and you did NOT address them:
      {{"status": "needs_revision", "last_comment_id": <max id you DID address>}}
-
-   If the diff exceeded the threshold in step 6:
-     {{"status": "failed_too_large", "insertions": <N>, "deletions": <M>}}
 
    If the push failed and you couldn't recover:
      {{"status": "no_pr", "reason": "<what failed>", "branch": "{branch}"}}
@@ -183,7 +164,6 @@ class PromptInputs:
     worktree_dir: Path
     branch: str
     result_file: Path
-    max_diff_loc: int
 
 
 @dataclass(frozen=True)
@@ -195,7 +175,6 @@ class RevisionInputs:
     worktree_dir: Path
     last_comment_id: int
     result_file: Path
-    max_diff_loc: int
 
 
 def _clone_url(repo: str) -> str:
@@ -212,7 +191,6 @@ def render_initial_prompt(inputs: PromptInputs) -> str:
         worktree_dir=inputs.worktree_dir,
         branch=inputs.branch,
         result_file=inputs.result_file,
-        max_diff_loc=inputs.max_diff_loc,
     )
 
 
@@ -227,5 +205,4 @@ def render_revision_prompt(inputs: RevisionInputs) -> str:
         worktree_dir=inputs.worktree_dir,
         last_comment_id=inputs.last_comment_id,
         result_file=inputs.result_file,
-        max_diff_loc=inputs.max_diff_loc,
     )

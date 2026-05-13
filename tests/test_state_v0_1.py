@@ -76,13 +76,6 @@ def test_failed_revision_is_terminal(state: State) -> None:
         state.update_status("local:foo", "submitted")
 
 
-def test_failed_too_large_is_terminal(state: State) -> None:
-    _seed(state)
-    state.update_status("local:foo", "failed_too_large")
-    with pytest.raises(ValueError, match="terminal state"):
-        state.update_status("local:foo", "needs_revision")
-
-
 def test_get_submitted_filters_by_pr_number(state: State) -> None:
     _seed(state, "local:a")
     _seed(state, "local:b")

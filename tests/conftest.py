@@ -23,7 +23,6 @@ def config(tmp_path: Path) -> Config:
         logs_dir=home / "logs",
         state_db=home / "state.db",
         default_repo=None,
-        max_diff_loc=2000,
     )
 
 

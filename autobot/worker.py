@@ -164,7 +164,6 @@ async def execute_task(
             worktree_dir=paths.worktree_dir,
             branch=paths.branch,
             result_file=paths.result_file,
-            max_diff_loc=config.max_diff_loc,
         )
     )
     options = _build_options(config, paths.canonical_dir)
@@ -206,10 +205,6 @@ def _apply_initial_result(
     if isinstance(result, results.NoPr):
         _write_error_sidecar(paths.result_file, f"no_pr: {result.reason}", paths.log_file)
         state.update_status(task_id, "failed_no_pr", branch=result.branch, session_id=session_id)
-        return
-    if isinstance(result, results.FailedTooLarge):
-        _write_error_sidecar(paths.result_file, f"failed_too_large: {result.insertions}+{result.deletions} loc", paths.log_file)
-        state.update_status(task_id, "failed_too_large", session_id=session_id)
         return
     # Unknown, or any shape that doesn't belong on an initial run (NeedsRevision,
     # NoAction, Revised) — treat as Unknown.
@@ -336,7 +331,6 @@ async def revise_task(
             worktree_dir=paths.worktree_dir,
             last_comment_id=row.last_comment_id or 0,
             result_file=revision_result_file,
-            max_diff_loc=config.max_diff_loc,
         )
     )
     options = _build_options(config, paths.canonical_dir)
@@ -368,10 +362,6 @@ def _apply_revision_result(
     if isinstance(result, results.NeedsRevision):
         # Mid-pass: new comments arrived. Don't bump revision_count; just queue another pass.
         state.update_status(task_id, "needs_revision", session_id=session_id)
-        return
-    if isinstance(result, results.FailedTooLarge):
-        _write_error_sidecar(result_file, f"failed_too_large: {result.insertions}+{result.deletions} loc", log_file)
-        state.update_status(task_id, "failed_too_large", session_id=session_id)
         return
     # Anything else (Unknown, NoPr, NoChanges, Submitted, NoAction) → failed_revision.
     reason = result.reason if isinstance(result, (results.Unknown, results.NoPr, results.NoChanges)) else f"unexpected revision result type: {type(result).__name__}"

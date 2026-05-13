@@ -24,12 +24,6 @@ class NoPr:
 
 
 @dataclass(frozen=True)
-class FailedTooLarge:
-    insertions: int
-    deletions: int
-
-
-@dataclass(frozen=True)
 class NeedsRevision:
     last_comment_id: int
 
@@ -50,7 +44,7 @@ class Unknown:
     reason: str
 
 
-Result = Union[Submitted, NoChanges, NoPr, FailedTooLarge, NeedsRevision, NoAction, Revised, Unknown]
+Result = Union[Submitted, NoChanges, NoPr, NeedsRevision, NoAction, Revised, Unknown]
 
 
 def read(result_file: Path) -> Result:
@@ -82,11 +76,6 @@ def _parse(data: dict) -> Result:
         return NoChanges(reason=str(data.get("reason", "")))
     if status == "no_pr":
         return NoPr(reason=str(data.get("reason", "")), branch=data.get("branch"))
-    if status == "failed_too_large":
-        try:
-            return FailedTooLarge(insertions=int(data["insertions"]), deletions=int(data["deletions"]))
-        except (KeyError, TypeError, ValueError) as e:
-            return Unknown(reason=f"failed_too_large result missing/invalid fields: {e}")
     if status == "needs_revision":
         try:
             return NeedsRevision(last_comment_id=int(data["last_comment_id"]))

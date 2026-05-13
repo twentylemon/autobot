@@ -13,7 +13,6 @@ class Config:
     logs_dir: Path
     state_db: Path
     default_repo: str | None  # owner/name, optional
-    max_diff_loc: int  # sprawling-diff guard threshold (insertions + deletions)
 
 
 def _autobot_home() -> Path:
@@ -39,7 +38,6 @@ def load() -> Config:
         logs_dir=home / "logs",
         state_db=state_db,
         default_repo=os.environ.get("AUTOBOT_DEFAULT_REPO") or None,
-        max_diff_loc=int(os.environ.get("AUTOBOT_MAX_DIFF_LOC", "2000")),
     )
     for d in (config.inbox_dir, config.processing_dir, config.work_dir, config.results_dir, config.logs_dir, config.state_db.parent):
         d.mkdir(parents=True, exist_ok=True)

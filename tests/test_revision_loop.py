@@ -44,15 +44,6 @@ def test_needs_revision_mid_pass_returns_to_needs_revision(state: State, config:
     assert final.revision_count == 0
 
 
-def test_failed_too_large_terminates(state: State, config: Config) -> None:
-    _seed_needs_revision(state)
-    row = state.get_by_id("local:foo-abc123")
-    payload = {"status": "failed_too_large", "insertions": 1500, "deletions": 800}
-    asyncio.run(worker.revise_task(row, state, config, query_fn=fake_query(payload), gh_fn=ok_gh()))
-
-    assert state.get_by_id(row.id).status == "failed_too_large"
-
-
 def test_no_pr_result_terminates_as_failed_revision(state: State, config: Config) -> None:
     _seed_needs_revision(state)
     row = state.get_by_id("local:foo-abc123")

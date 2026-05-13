@@ -14,7 +14,6 @@ STATUSES = {
     "completed",
     "failed_no_changes",
     "failed_no_pr",
-    "failed_too_large",
     "failed_revision",
     "failed_unknown",
 }
@@ -22,7 +21,6 @@ TERMINAL_STATUSES = {
     "completed",
     "failed_no_changes",
     "failed_no_pr",
-    "failed_too_large",
     "failed_revision",
     "failed_unknown",
 }
@@ -32,10 +30,10 @@ TERMINAL_STATUSES = {
 # `completed` = "PR is no longer ours" (user closed, merged, or marked ready
 # for review). It can be reached from any active state.
 ALLOWED_TRANSITIONS: dict[str, set[str]] = {
-    "pending": {"submitted", "failed_no_changes", "failed_no_pr", "failed_too_large", "failed_unknown"},
+    "pending": {"submitted", "failed_no_changes", "failed_no_pr", "failed_unknown"},
     "submitted": {"needs_revision", "completed"},
     "needs_revision": {"revising", "completed"},
-    "revising": {"submitted", "needs_revision", "completed", "failed_revision", "failed_too_large"},
+    "revising": {"submitted", "needs_revision", "completed", "failed_revision"},
 }
 
 

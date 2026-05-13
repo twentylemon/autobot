@@ -47,7 +47,6 @@ the next tick, revising the PR on the same branch.
 pip install -e .
 export GITHUB_TOKEN=...                            # PAT with `repo` scope
 export AUTOBOT_DEFAULT_REPO=twentylemon/duckbot    # optional
-export AUTOBOT_MAX_DIFF_LOC=2000                   # optional, sprawl guard
 ```
 
 The Claude Agent SDK ships a bundled `claude` CLI binary and shells out to
@@ -119,9 +118,6 @@ locate `~/.claude/` and pick up your subscription credentials.
   feedback (e.g. push rejected, ambiguous comment). Inspect
   `logs/<task>.revision-*.log` for the SDK trace; if you want another
   attempt, manually flip the row back to `needs_revision`.
-- **Task in `failed_too_large`:** terminal — Claude's diff exceeded
-  `AUTOBOT_MAX_DIFF_LOC` (default 2000). Either raise the cap, split the
-  task, or close the PR by hand.
 - **Stale worktree:** `git -C ~/.autobot/work/<owner>__<repo>/main worktree prune`.
 
 ## Tests

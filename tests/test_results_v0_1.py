@@ -8,31 +8,6 @@ def _write(path: Path, data: dict) -> None:
     path.write_text(json.dumps(data), encoding="utf-8")
 
 
-def test_parse_failed_too_large(tmp_path: Path) -> None:
-    p = tmp_path / "r.json"
-    _write(p, {"status": "failed_too_large", "insertions": 1500, "deletions": 700})
-    r = results.read(p)
-    assert isinstance(r, results.FailedTooLarge)
-    assert r.insertions == 1500
-    assert r.deletions == 700
-
-
-def test_parse_failed_too_large_coerces_strings(tmp_path: Path) -> None:
-    p = tmp_path / "r.json"
-    _write(p, {"status": "failed_too_large", "insertions": "1200", "deletions": "100"})
-    r = results.read(p)
-    assert isinstance(r, results.FailedTooLarge)
-    assert r.insertions == 1200
-
-
-def test_parse_failed_too_large_missing_field_is_unknown(tmp_path: Path) -> None:
-    p = tmp_path / "r.json"
-    _write(p, {"status": "failed_too_large", "insertions": 100})
-    r = results.read(p)
-    assert isinstance(r, results.Unknown)
-    assert "failed_too_large" in r.reason
-
-
 def test_parse_needs_revision(tmp_path: Path) -> None:
     p = tmp_path / "r.json"
     _write(p, {"status": "needs_revision", "last_comment_id": 12345})
