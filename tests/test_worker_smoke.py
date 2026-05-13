@@ -114,6 +114,8 @@ def _row(config: Config, repo: str, task_id: str):
         pr_url=None,
         pr_number=None,
         session_id=None,
+        last_comment_id=None,
+        revision_count=0,
         created_at=datetime(2026, 4, 30, tzinfo=timezone.utc),
         updated_at=datetime(2026, 4, 30, tzinfo=timezone.utc),
     )

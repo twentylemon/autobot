@@ -24,11 +24,27 @@ class NoPr:
 
 
 @dataclass(frozen=True)
+class NeedsRevision:
+    last_comment_id: int
+
+
+@dataclass(frozen=True)
+class NoAction:
+    pass
+
+
+@dataclass(frozen=True)
+class Revised:
+    last_comment_id: int
+    head_sha: str
+
+
+@dataclass(frozen=True)
 class Unknown:
     reason: str
 
 
-Result = Union[Submitted, NoChanges, NoPr, Unknown]
+Result = Union[Submitted, NoChanges, NoPr, NeedsRevision, NoAction, Revised, Unknown]
 
 
 def read(result_file: Path) -> Result:
@@ -60,4 +76,16 @@ def _parse(data: dict) -> Result:
         return NoChanges(reason=str(data.get("reason", "")))
     if status == "no_pr":
         return NoPr(reason=str(data.get("reason", "")), branch=data.get("branch"))
+    if status == "needs_revision":
+        try:
+            return NeedsRevision(last_comment_id=int(data["last_comment_id"]))
+        except (KeyError, TypeError, ValueError) as e:
+            return Unknown(reason=f"needs_revision result missing/invalid fields: {e}")
+    if status == "no_action":
+        return NoAction()
+    if status == "revised":
+        try:
+            return Revised(last_comment_id=int(data["last_comment_id"]), head_sha=str(data["head_sha"]))
+        except (KeyError, TypeError, ValueError) as e:
+            return Unknown(reason=f"revised result missing/invalid fields: {e}")
     return Unknown(reason=f"unknown status in result file: {status!r}")

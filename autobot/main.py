@@ -45,6 +45,17 @@ def _ingest(source: LocalFileSource, state: State) -> int:
     return inserted
 
 
+def _poll_open_prs(state: State, config: Config) -> int:
+    rows = state.get_submitted()
+    for row in rows:
+        log.info("polling task %s (pr=%s)", row.id, row.pr_url)
+        try:
+            worker.poll_pr(row, state, config)
+        except Exception:
+            log.exception("poll crashed on task %s", row.id)
+    return len(rows)
+
+
 async def _execute_pending(source: LocalFileSource, state: State, config: Config) -> int:
     pending = state.get_pending()
     for row in pending:
@@ -56,17 +67,47 @@ async def _execute_pending(source: LocalFileSource, state: State, config: Config
     return len(pending)
 
 
+async def _execute_revisions(state: State, config: Config) -> int:
+    rows = state.get_needs_revision()
+    for row in rows:
+        log.info("revising task %s (pr=%s, prior_revisions=%d)", row.id, row.pr_url, row.revision_count)
+        try:
+            await worker.revise_task(row, state, config)
+        except Exception:
+            log.exception("revision crashed on task %s", row.id)
+    return len(rows)
+
+
 def _tick(config: Config) -> None:
+    """Per-tick phases: discover → poll → recover → execute pending → execute revisions.
+
+    Per-task failures inside each phase are caught and logged with task id +
+    phase verb + traceback, so one bad row doesn't skip the rest of its phase
+    or block subsequent phases. (v0.2 will slot a reconcile phase between
+    recover and execute pending.)
+    """
     source = _build_source(config)
     state = State(config.state_db)
     try:
         try:
-            inserted = _ingest(source, state)
+            ingested = _ingest(source, state)
         except MissingRepoError as e:
             log.error("inbox file rejected: %s", e)
-            inserted = 0
-        executed = asyncio.run(_execute_pending(source, state, config))
-        log.info("tick complete: ingested=%d executed=%d", inserted, executed)
+            ingested = 0
+
+        polled = _poll_open_prs(state, config)
+        recovered = worker.recover_stale_leases(state)
+
+        async def run_async_phases() -> tuple[int, int]:
+            executed = await _execute_pending(source, state, config)
+            revised = await _execute_revisions(state, config)
+            return executed, revised
+
+        executed, revised = asyncio.run(run_async_phases())
+        log.info(
+            "tick complete: ingested=%d polled=%d recovered=%d executed=%d revised=%d",
+            ingested, polled, recovered, executed, revised,
+        )
     finally:
         state.close()
 

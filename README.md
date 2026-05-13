@@ -3,13 +3,14 @@
 A personal service that turns short task descriptions into draft pull requests.
 
 Drop a markdown file in `~/.autobot/inbox/`, wait, and a draft PR shows up
-on the target repo. Comment on the PR and (in v0.1+) the bot will revise it.
+on the target repo. Comment on the PR and the bot picks up your feedback on
+the next tick, revising the PR on the same branch.
 
-## v0 scope
+## v0.1 scope
 
-- **In:** local-file task source, discovery, single draft PR per task.
-- **Out (deferred):** PR comment-revision loop (v0.1), merge detection (v0.2),
-  GitHub-issue source (v1).
+- **In:** local-file task source, discovery, single draft PR per task,
+  PR comment-revision loop on the same branch.
+- **Out (deferred):** merge detection (v0.2), GitHub-issue source (v1).
 
 ## How it works
 
@@ -17,14 +18,28 @@ on the target repo. Comment on the PR and (in v0.1+) the bot will revise it.
 
 1. **Discover** — scan `~/.autobot/inbox/*.md`, insert any new tasks into
    `~/.autobot/state.db`.
-2. **Execute** — for each pending task, render a prompt and invoke the Claude
-   Agent SDK. Claude does *all* git/`gh` operations: refresh the canonical
-   clone, create a `git worktree` on a fresh branch, edit files, commit,
-   push, and `gh pr create --draft`.
-3. **Reconcile** — Claude writes a JSON result file at
-   `~/.autobot/results/<task-id>.json`; the worker reads it and transitions
-   the task to `submitted` / `failed_no_changes` / `failed_no_pr` /
-   `failed_unknown`.
+2. **Poll** — for each row in `submitted`, shell `gh` directly to
+   fetch PR metadata + comments. If the PR is no longer draft+open
+   (closed, merged, or marked ready for review), the user has taken
+   over — transition to `completed` and stop. Otherwise filter out
+   the bot's own comments and any with `id <= last_comment_id`;
+   transition to `needs_revision` if a new comment qualifies. No LLM
+   call — pure HTTP + JSON filtering.
+3. **Recover stale leases** — any row stuck in `revising` past the cutoff
+   (default 30 min) is bumped back to `needs_revision` for retry.
+4. **Execute pending** — for each `pending` task, render the initial
+   prompt and invoke the Claude Agent SDK. Claude does *all* git/`gh`
+   operations: refresh the canonical clone, create a `git worktree` on a
+   fresh branch, edit files, commit, push, and `gh pr create --draft`.
+5. **Execute revisions** — for each `needs_revision` row, Claude
+   re-enters the worktree, fetches the new comment thread, addresses
+   the feedback, commits, and pushes — keeping the PR in draft state.
+   Per-PR revision rate is bounded naturally: a PR is only ever in one
+   state at a time, so the next revision can't start until this one
+   finishes.
+6. **Reconcile** — Claude writes a JSON result file at
+   `~/.autobot/results/<task-id>.json`; the worker reads it and applies
+   the appropriate state transition.
 
 ## Setup
 
@@ -83,15 +98,26 @@ locate `~/.claude/` and pick up your subscription credentials.
   work/<owner>__<repo>/wt/<task>/    # per-task worktree
   results/<task>.json                # Claude's structured result
   results/<task>.json.error          # sidecar on failure
-  logs/<task>.log                    # JSONL of SDK messages
+  logs/<task>.log                    # JSONL of SDK messages (initial run)
+  logs/<task>.revision-<n>.log       # one per revision pass
   state.db                           # SQLite task state
 ```
 
 ## Recovery
 
+- **Task in `completed`:** terminal — the user took over the PR (closed,
+  merged, or marked it ready for review). No action needed; the row stays
+  for audit. To reopen iteration, drop a new task file.
 - **Task stuck pending after a crash:** worker moved the source file to
   `processing/` before invoking Claude, so `--once` will not re-pick it.
   Manually move it back to `inbox/` and delete the row from `state.db`.
+- **Task stuck in `revising` after a crash:** the next tick's stale-lease
+  recovery phase will bump it back to `needs_revision` automatically once
+  `updated_at` is older than 30 minutes.
+- **Task in `failed_revision`:** terminal — Claude couldn't address the
+  feedback (e.g. push rejected, ambiguous comment). Inspect
+  `logs/<task>.revision-*.log` for the SDK trace; if you want another
+  attempt, manually flip the row back to `needs_revision`.
 - **Stale worktree:** `git -C ~/.autobot/work/<owner>__<repo>/main worktree prune`.
 
 ## Tests
@@ -103,6 +129,5 @@ python -m pytest
 ## Roadmap & open questions
 
 See [`docs/`](docs/) — [`roadmap.md`](docs/roadmap.md) for upcoming
-phases (v0.1 PR revision, v0.2 merge detection, v0.3 destination
-abstraction) and [`open-questions.md`](docs/open-questions.md) for
-surviving risks.
+phases (v0.2 merge detection, v0.3 destination abstraction) and
+[`open-questions.md`](docs/open-questions.md) for surviving risks.

@@ -32,9 +32,10 @@ refined task file in `inbox/`. v0.1 makes the loop conversational.
 - Build a revision prompt: original task + comment thread + current
   diff (Claude fetches both itself), invoke a fresh `query()` per
   revision (stateless; survives restarts).
-- Three new columns on `tasks` (`last_comment_id`, `revision_count`,
-  `last_revision_at`) — no separate revision table.
-- Rate limits: ~3 revisions/hour/PR, hard cap ~10 total/PR.
+- Two new columns on `tasks` (`last_comment_id`, `revision_count`) —
+  no separate revision table.
+- Per-PR revision rate is bounded naturally — only one revision per PR
+  is in flight at a time, so tick frequency is the rate limit.
 - Worker-side hardening folded in: PR-draft sanity check (in prompt),
   sprawling-diff guard (in prompt), `PreToolUse` hook on `Bash`
   (worker-side SDK).
